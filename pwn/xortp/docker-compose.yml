@@ -1,0 +1,5 @@
+services:
+  xortp:
+    image: anssi/fcsc2025-pwn-xortp:latest
+    ports:
+      - "4000:4000"
